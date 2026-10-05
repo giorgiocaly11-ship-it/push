@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>PushUp Tracker</title>
+    <!-- Importiamo MediaPipe per il tracciamento del corpo -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <style>
+        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #121212; color: white; text-align: center; overflow: hidden; }
+        video { display: none; }
+        canvas { width: 100%; height: 60vh; background: #000; object-fit: cover; transform: scaleX(-1); }
+        .ui-container { padding: 15px; }
+        .counter { font-size: 65px; font-weight: bold; margin: 5px 0; color: #ffffff; text-shadow: 0 0 10px rgba(0,255,136,0.5); }
+        button { background: #00ff88; color: #121212; border: none; padding: 15px 25px; font-size: 18px; border-radius: 10px; margin: 10px; font-weight: bold; cursor: pointer; }
+        #record-display { font-size: 16px; color: #aaa; margin-bottom: 5px; }
+        #status { font-size: 18px; color: #ddd; margin-bottom: 10px;}
+    </style>
+</head>
+<body>
+
+    <video id="video" autoplay playsinline></video>
+    <canvas id="canvas"></canvas>
+
+    <div class="ui-container">
+        <div id="record-display">Record Attuale: <span id="record-val" style="color: #00ff88; font-weight: bold;">0</span></div>
+        <div id="status">Scegli una modalità per iniziare</div>
+        <div class="counter" id="counter">0</div>
+        
+        <div id="menu">
+            <button onclick="startCountdown('record')">Modalità Record</button>
+            <button onclick="startCountdown('training')">Allenamento</button>
+        </div>
+        <button id="stop-btn" style="display:none; background:#ff3366; color:white;" onclick="stopWorkout()">Ferma & Salva</button>
+    </div>
+
+    <script>
+        const videoElement = document.getElementById('video');
+        const canvasElement = document.getElementById('canvas');
+        const canvasCtx = canvasElement.getContext('2d');
+        const counterEl = document.getElementById('counter');
+        const recordValEl = document.getElementById('record-val');
+        
+        let count = 0;
+        let position = 'up'; 
+        let mode = null; // Può essere 'countdown', 'record', 'training'
+        let targetTraining = 0;
+        
+        let record = localStorage.getItem('pushup_record') || 0;
+        recordValEl.innerText = record;
+
+        function calculateAngle(a, b, c) {
+            let radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+            let angle = Math.abs(radians * 180.0 / Math.PI);
+            if (angle > 180.0) angle = 360 - angle;
+            return angle;
+        }
+
+        function onResults(results) {
+            canvasElement.width = videoElement.videoWidth;
+            canvasElement.height = videoElement.videoHeight;
+            canvasCtx.save();
+            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+            let skeletonColor = '#FF0000'; // Colore base: Rosso
+
+            if (results.poseLandmarks) {
+                const shoulder = results.poseLandmarks[11];
+                const elbow = results.poseLandmarks[13];
+                const wrist = results.poseLandmarks[15];
+
+                if (shoulder && elbow && wrist) {
+                    const angle = calculateAngle(shoulder, elbow, wrist);
+
+                    let depthRatio = (160 - angle) / (160 - 90);
+                    if (depthRatio < 0) depthRatio = 0;
+                    if (depthRatio > 1) depthRatio = 1;
+
+                    let red = Math.floor(255 * (1 - depthRatio));
+                    let green = Math.floor(255 * depthRatio);
+                    skeletonColor = `rgb(${red}, ${green}, 0)`;
+
+                    // Contiamo i piegamenti SOLTANTO se la modalità attiva è 'record' o 'training' (quindi dopo il countdown)
+                    if (mode === 'record' || mode === 'training') {
+                        if (angle > 160) {
+                            if (position === 'down') {
+                                if (mode === 'record') {
+                                    count++;
+                                } else if (mode === 'training' && count > 0) {
+                                    count--;
+                                    if(count === 0) stopWorkout(true);
+                                }
+                                counterEl.innerText = count;
+                            }
+                            position = 'up';
+                        }
+                        if (angle < 90) {
+                            position = 'down';
+                        }
+                    }
+                }
+
+                drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, 
+                               {color: skeletonColor, lineWidth: 6});
+                drawLandmarks(canvasCtx, results.poseLandmarks, 
+                              {color: '#ffffff', fillColor: skeletonColor, lineWidth: 2, radius: 4});
+            }
+            canvasCtx.restore();
+        }
+
+        const pose = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
+        pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
+        pose.onResults(onResults);
+
+        const camera = new Camera(videoElement, {
+            onFrame: async () => { await pose.send({image: videoElement}); },
+            width: 640, height: 480
+        });
+        camera.start();
+
+        function startCountdown(selectedMode) {
+            if (selectedMode === 'training') {
+                let targetInput = prompt("Quanti piegamenti vuoi fare?", "20");
+                if(!targetInput || isNaN(targetInput)) return;
+                targetTraining = parseInt(targetInput);
+            }
+
+            mode = 'countdown';
+            document.getElementById('menu').style.display = 'none';
+            
+            let timeLeft = 5;
+            document.getElementById('status').innerText = 'Mettiti in posizione!';
+            counterEl.innerText = timeLeft;
+            counterEl.style.color = '#ffaa00';
+
+            let timerInterval = setInterval(() => {
+                timeLeft--;
+                if (timeLeft > 0) {
+                    counterEl.innerText = timeLeft;
+                } else {
+                    clearInterval(timerInterval);
+                    // Adesso facciamo partire la vera sessione
+                    if (selectedMode === 'record') {
+                        mode = 'record';
+                        count = 0;
+                        counterEl.innerText = count;
+                        counterEl.style.color = '#00ff88';
+                        document.getElementById('status').innerText = 'VIA! Fanne il più possibile!';
+                    } else {
+                        mode = 'training';
+                        count = targetTraining;
+                        counterEl.innerText = count;
+                        counterEl.style.color = '#00ff88';
+                        document.getElementById('status').innerText = 'VIA! Scendi a zero!';
+                    }
+                    document.getElementById('stop-btn').style.display = 'inline-block';
+                }
+            }, 1000);
+        }
+
+        function stopWorkout(completed = false) {
+            if (mode === 'record' && count > record) {
+                record = count;
+                localStorage.setItem('pushup_record', record);
+                recordValEl.innerText = record;
+                alert("NUOVO RECORD: " + record + " piegamenti!");
+            } else if (completed) {
+                alert("Allenamento completato! Ottimo lavoro.");
+            }
+            mode = null;
+            document.getElementById('menu').style.display = 'block';
+            document.getElementById('stop-btn').style.display = 'none';
+            document.getElementById('status').innerText = 'Scegli una modalità per iniziare';
+            counterEl.style.color = '#ffffff';
+            counterEl.innerText = '0';
+        }
+    </script>
+</body>
+</html>
