@@ -2,181 +2,284 @@
 <html lang="it">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>PushUp Tracker</title>
-    <!-- Importiamo MediaPipe per il tracciamento del corpo -->
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js"></script>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>AI Fitness Tracker</title>
+    <!-- MediaPipe Pose & Camera Utils -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js" crossorigin="anonymous"></script>
     <style>
-        body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif; background: #121212; color: white; text-align: center; overflow: hidden; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background-color: #0b0f19; color: #ffffff; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+        
+        .screen { display: none; width: 100vw; height: 100vh; flex-direction: column; align-items: center; justify-content: center; padding: 20px; position: absolute; top: 0; left: 0; }
+        .screen.active { display: flex; }
+
+        h1 { font-size: 26px; margin-bottom: 20px; font-weight: 700; text-align: center; }
+        h2 { font-size: 20px; margin-bottom: 30px; color: #94a3b8; text-align: center; }
+
+        .btn { width: 85%; max-width: 320px; padding: 18px; margin: 10px 0; font-size: 18px; font-weight: 600; border: none; border-radius: 16px; cursor: pointer; transition: transform 0.1s, background-color 0.2s; box-shadow: 0 4px 12px rgba(0,0,0,0.3); }
+        .btn:active { transform: scale(0.97); }
+        .btn-primary { background: linear-gradient(135deg, #3b82f6, #1d4ed8); color: white; }
+        .btn-success { background: linear-gradient(135deg, #10b981, #059669); color: white; }
+        .btn-back { background: #334155; color: #cbd5e1; margin-top: 20px; }
+
+        #app-container { position: relative; width: 100vw; height: 100vh; background: #000; }
         video { display: none; }
-        canvas { width: 100%; height: 60vh; background: #000; object-fit: cover; transform: scaleX(-1); }
-        .ui-container { padding: 15px; }
-        .counter { font-size: 65px; font-weight: bold; margin: 5px 0; color: #ffffff; text-shadow: 0 0 10px rgba(0,255,136,0.5); }
-        button { background: #00ff88; color: #121212; border: none; padding: 15px 25px; font-size: 18px; border-radius: 10px; margin: 10px; font-weight: bold; cursor: pointer; }
-        #record-display { font-size: 16px; color: #aaa; margin-bottom: 5px; }
-        #status { font-size: 18px; color: #ddd; margin-bottom: 10px;}
+        canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; }
+
+        .overlay-ui { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; justify-content: space-between; padding: 20px; pointer-events: none; z-index: 10; }
+        .top-bar { display: flex; justify-content: space-between; align-items: center; width: 100%; }
+        .back-icon { pointer-events: auto; background: rgba(0,0,0,0.6); color: white; border: none; padding: 10px 16px; border-radius: 10px; font-size: 16px; cursor: pointer; }
+        
+        .counter-badge { background: rgba(0, 0, 0, 0.7); backdrop-filter: blur(10px); padding: 15px 30px; border-radius: 20px; font-size: 48px; font-weight: 800; color: #10b981; border: 2px solid rgba(16, 185, 129, 0.3); text-align: center; }
+        
+        .countdown-overlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 20; }
+        .countdown-number { font-size: 100px; font-weight: 900; color: #3b82f6; animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.1); opacity: 0.7; } 100% { transform: scale(1); opacity: 1; } }
     </style>
 </head>
 <body>
 
-    <video id="video" autoplay playsinline></video>
-    <canvas id="canvas"></canvas>
-
-    <div class="ui-container">
-        <div id="record-display">Record Attuale: <span id="record-val" style="color: #00ff88; font-weight: bold;">0</span></div>
-        <div id="status">Scegli una modalità per iniziare</div>
-        <div class="counter" id="counter">0</div>
-        
-        <div id="menu">
-            <button onclick="startCountdown('record')">Modalità Record</button>
-            <button onclick="startCountdown('training')">Allenamento</button>
-        </div>
-        <button id="stop-btn" style="display:none; background:#ff3366; color:white;" onclick="stopWorkout()">Ferma & Salva</button>
+    <!-- SCHERMATA 1: SCELTA ESERCIZIO -->
+    <div id="screen-exercise" class="screen active">
+        <h1>Seleziona Esercizio</h1>
+        <button class="btn btn-primary" onclick="selectExercise('pushup')">Flessioni (Push-up)</button>
+        <button class="btn btn-primary" onclick="selectExercise('situp')">Addominali (Sit-up)</button>
     </div>
 
-    <script>
-        const videoElement = document.getElementById('video');
-        const canvasElement = document.getElementById('canvas');
-        const canvasCtx = canvasElement.getContext('2d');
-        const counterEl = document.getElementById('counter');
-        const recordValEl = document.getElementById('record-val');
-        
-        let count = 0;
-        let position = 'up'; 
-        let mode = null; // Può essere 'countdown', 'record', 'training'
-        let targetTraining = 0;
-        
-        let record = localStorage.getItem('pushup_record') || 0;
-        recordValEl.innerText = record;
+    <!-- SCHERMATA 2: SCELTA MODALITÀ -->
+    <div id="screen-mode" class="screen">
+        <h1 id="mode-title-text">Modalità</h1>
+        <button class="btn btn-success" onclick="selectMode('training')">Allenamento</button>
+        <button class="btn btn-primary" onclick="selectMode('record')">Record</button>
+        <button class="btn btn-back" onclick="goToScreen('screen-exercise')">Indietro</button>
+    </div>
 
-        function calculateAngle(a, b, c) {
-            let radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
-            let angle = Math.abs(radians * 180.0 / Math.PI);
-            if (angle > 180.0) angle = 360 - angle;
-            return angle;
-        }
-
-        function onResults(results) {
-            canvasElement.width = videoElement.videoWidth;
-            canvasElement.height = videoElement.videoHeight;
-            canvasCtx.save();
-            canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-            canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
-
-            let skeletonColor = '#FF0000'; // Colore base: Rosso
-
-            if (results.poseLandmarks) {
-                const shoulder = results.poseLandmarks[11];
-                const elbow = results.poseLandmarks[13];
-                const wrist = results.poseLandmarks[15];
-
-                if (shoulder && elbow && wrist) {
-                    const angle = calculateAngle(shoulder, elbow, wrist);
-
-                    let depthRatio = (160 - angle) / (160 - 90);
-                    if (depthRatio < 0) depthRatio = 0;
-                    if (depthRatio > 1) depthRatio = 1;
-
-                    let red = Math.floor(255 * (1 - depthRatio));
-                    let green = Math.floor(255 * depthRatio);
-                    skeletonColor = `rgb(${red}, ${green}, 0)`;
-
-                    // Contiamo i piegamenti SOLTANTO se la modalità attiva è 'record' o 'training' (quindi dopo il countdown)
-                    if (mode === 'record' || mode === 'training') {
-                        if (angle > 160) {
-                            if (position === 'down') {
-                                if (mode === 'record') {
-                                    count++;
-                                } else if (mode === 'training' && count > 0) {
-                                    count--;
-                                    if(count === 0) stopWorkout(true);
-                                }
-                                counterEl.innerText = count;
-                            }
-                            position = 'up';
-                        }
-                        if (angle < 90) {
-                            position = 'down';
-                        }
-                    }
-                }
-
-                drawConnectors(canvasCtx, results.poseLandmarks, POSE_CONNECTIONS, 
-                               {color: skeletonColor, lineWidth: 6});
-                drawLandmarks(canvasCtx, results.poseLandmarks, 
-                              {color: '#ffffff', fillColor: skeletonColor, lineWidth: 2, radius: 4});
-            }
-            canvasCtx.restore();
-        }
-
-        const pose = new Pose({locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`});
-        pose.setOptions({ modelComplexity: 1, smoothLandmarks: true, minDetectionConfidence: 0.5, minTrackingConfidence: 0.5 });
-        pose.onResults(onResults);
-
-        const camera = new Camera(videoElement, {
-            onFrame: async () => { await pose.send({image: videoElement}); },
-            width: 640, height: 480
-        });
-        camera.start();
-
-        function startCountdown(selectedMode) {
-            if (selectedMode === 'training') {
-                let targetInput = prompt("Quanti piegamenti vuoi fare?", "20");
-                if(!targetInput || isNaN(targetInput)) return;
-                targetTraining = parseInt(targetInput);
-            }
-
-            mode = 'countdown';
-            document.getElementById('menu').style.display = 'none';
+    <!-- SCHERMATA 3: APP DI TRACCIAMENTO CAMERA -->
+    <div id="screen-app" class="screen" style="padding:0;">
+        <div id="app-container">
+            <video id="webcam" playsinline></video>
+            <canvas id="output-canvas"></canvas>
             
-            let timeLeft = 5;
-            document.getElementById('status').innerText = 'Mettiti in posizione!';
-            counterEl.innerText = timeLeft;
-            counterEl.style.color = '#ffaa00';
+            <div class="overlay-ui">
+                <div class="top-bar">
+                    <button class="back-icon" onclick="stopApp()">✕ Esci</button>
+                    <div id="timer-display" style="font-size: 20px; font-weight: bold; background: rgba(0,0,0,0.6); padding: 8px 15px; border-radius: 10px;"></div>
+                </div>
+                <div style="display: flex; justify-content: center;">
+                    <div class="counter-badge" id="count-display">0</div>
+                </div>
+                <div style="text-align: center; padding-bottom: 10px;">
+                    <span id="status-text" style="background: rgba(0,0,0,0.6); padding: 8px 16px; border-radius: 8px; font-size: 15px; color: #cbd5e1;">Posizionati davanti alla telecamera</span>
+                </div>
+            </div>
 
-            let timerInterval = setInterval(() => {
-                timeLeft--;
-                if (timeLeft > 0) {
-                    counterEl.innerText = timeLeft;
-                } else {
-                    clearInterval(timerInterval);
-                    // Adesso facciamo partire la vera sessione
-                    if (selectedMode === 'record') {
-                        mode = 'record';
-                        count = 0;
-                        counterEl.innerText = count;
-                        counterEl.style.color = '#00ff88';
-                        document.getElementById('status').innerText = 'VIA! Fanne il più possibile!';
-                    } else {
-                        mode = 'training';
-                        count = targetTraining;
-                        counterEl.innerText = count;
-                        counterEl.style.color = '#00ff88';
-                        document.getElementById('status').innerText = 'VIA! Scendi a zero!';
-                    }
-                    document.getElementById('stop-btn').style.display = 'inline-block';
-                }
-            }, 1000);
+            <div id="countdown-screen" class="countdown-overlay" style="display: none;">
+                <div style="font-size: 24px; margin-bottom: 20px; color: #94a3b8;">Preparati...</div>
+                <div class="countdown-number" id="countdown-val">5</div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    let currentExercise = ''; // 'pushup' o 'situp'
+    let currentMode = '';     // 'training' o 'record'
+    
+    let count = 0;
+    let stage = "up"; // "up" o "down"
+    let poseInstance = null;
+    let cameraInstance = null;
+    let isTrackingActive = false;
+
+    const videoElement = document.getElementById('webcam');
+    const canvasElement = document.getElementById('output-canvas');
+    const canvasCtx = canvasElement.getContext('2d');
+
+    function goToScreen(screenId) {
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById(screenId).classList.add('active');
+    }
+
+    function selectExercise(ex) {
+        currentExercise = ex;
+        document.getElementById('mode-title-text').innerText = ex === 'pushup' ? 'Flessioni' : 'Addominali';
+        goToScreen('screen-mode');
+    }
+
+    function selectMode(mod) {
+        currentMode = mod;
+        goToScreen('screen-app');
+        startCountdownAndApp();
+    }
+
+    function stopApp() {
+        isTrackingActive = false;
+        if (cameraInstance) {
+            try { cameraInstance.stop(); } catch(e){}
         }
+        if (poseInstance) {
+            try { poseInstance.close(); } catch(e){}
+        }
+        count = 0;
+        stage = "up";
+        document.getElementById('count-display').innerText = "0";
+        goToScreen('screen-exercise');
+    }
 
-        function stopWorkout(completed = false) {
-            if (mode === 'record' && count > record) {
-                record = count;
-                localStorage.setItem('pushup_record', record);
-                recordValEl.innerText = record;
-                alert("NUOVO RECORD: " + record + " piegamenti!");
-            } else if (completed) {
-                alert("Allenamento completato! Ottimo lavoro.");
+    function startCountdownAndApp() {
+        const cdScreen = document.getElementById('countdown-screen');
+        const cdVal = document.getElementById('countdown-val');
+        cdScreen.style.display = 'flex';
+        let timeLeft = 5;
+        cdVal.innerText = timeLeft;
+
+        let timer = setInterval(() => {
+            timeLeft--;
+            if (timeLeft > 0) {
+                cdVal.innerText = timeLeft;
+            } else {
+                clearInterval(timer);
+                cdScreen.style.display = 'none';
+                initPoseTracking();
             }
-            mode = null;
-            document.getElementById('menu').style.display = 'block';
-            document.getElementById('stop-btn').style.display = 'none';
-            document.getElementById('status').innerText = 'Scegli una modalità per iniziare';
-            counterEl.style.color = '#ffffff';
-            counterEl.innerText = '0';
+        }, 1000);
+    }
+
+    function calculateAngle(a, b, c) {
+        let radians = Math.atan2(c.y - b.y, c.x - b.x) - Math.atan2(a.y - b.y, a.x - b.x);
+        let angle = Math.abs(radians * 180.0 / Math.PI);
+        if (angle > 180.0) angle = 360.0 - angle;
+        return angle;
+    }
+
+    function initPoseTracking() {
+        count = 0;
+        stage = "up";
+        document.getElementById('count-display').innerText = "0";
+        isTrackingActive = true;
+
+        poseInstance = new Pose({
+            locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
+        });
+
+        poseInstance.setOptions({
+            modelComplexity: 1,
+            smoothLandmarks: true,
+            enableSegmentation: false,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5
+        });
+
+        poseInstance.onResults(onPoseResults);
+
+        cameraInstance = new Camera(videoElement, {
+            onFrame: async () => {
+                if (isTrackingActive) {
+                    await poseInstance.send({ image: videoElement });
+                }
+            },
+            width: 1280,
+            height: 720
+        });
+        cameraInstance.start();
+    }
+
+    function onPoseResults(results) {
+        if (!isTrackingActive) return;
+
+        canvasElement.width = videoElement.videoWidth;
+        canvasElement.height = videoElement.videoHeight;
+
+        canvasCtx.save();
+        canvasCtx.clearRect(0, 0, canvasElement.width, canvasElement.height);
+        canvasCtx.drawImage(results.image, 0, 0, canvasElement.width, canvasElement.height);
+
+        if (results.poseLandmarks) {
+            let landmarks = results.poseLandmarks;
+            let isCorrectForm = false;
+
+            if (currentExercise === 'pushup') {
+                // Logica Flessioni (gomiti: spalla-gomito-polsi)
+                let shoulder = landmarks[11];
+                let elbow = landmarks[13];
+                let wrist = landmarks[15];
+                let angle = calculateAngle(shoulder, elbow, wrist);
+
+                if (angle > 160) {
+                    stage = "up";
+                    isCorrectForm = false;
+                }
+                if (angle < 90 && stage === "up") {
+                    stage = "down";
+                    count++;
+                    document.getElementById('count-display').innerText = count;
+                    isCorrectForm = true;
+                }
+                document.getElementById('status-text').innerText = stage === "up" ? "Scendi giù piegando le braccia" : "Ottimo! Risali";
+
+            } else if (currentExercise === 'situp') {
+                // Logica Addominali (anca-spalla rispetto all'asse verticale o ginocchia)
+                let hip = landmarks[23];
+                let shoulder = landmarks[11];
+                let knee = landmarks[25];
+                let angle = calculateAngle(hip, shoulder, knee);
+
+                // Quando ti sollevi verso le ginocchia l'angolo si chiude
+                if (angle > 110) {
+                    stage = "down";
+                    isCorrectForm = false;
+                }
+                if (angle < 65 && stage === "down") {
+                    stage = "up";
+                    count++;
+                    document.getElementById('count-display').innerText = count;
+                    isCorrectForm = true;
+                }
+                document.getElementById('status-text').innerText = stage === "down" ? "Solleva il busto verso le ginocchia" : "Ottimo! Torna giù";
+            }
+
+            // Disegno dello scheletro dinamico (Verde se in posizione corretta/completata, Rosso altrimenti)
+            let lineColor = isCorrectForm ? '#10b981' : '#ef4444';
+            drawCustomSkeleton(canvasCtx, landmarks, lineColor);
+        } else {
+            document.getElementById('status-text').innerText = "Inquadrati bene nella telecamera";
         }
-    </script>
+
+        canvasCtx.restore();
+    }
+
+    function drawCustomSkeleton(ctx, landmarks, color) {
+        const connections = [
+            [11, 13], [13, 15], // Braccio sx
+            [12, 14], [14, 16], // Braccio dx
+            [11, 23], [12, 24], // Busto
+            [23, 25], [25, 27], // Gamba sx
+            [24, 26], [26, 28]  // Gamba dx
+        ];
+
+        ctx.lineWidth = 6;
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+
+        for (let conn of connections) {
+            let p1 = landmarks[conn[0]];
+            let p2 = landmarks[conn[1]];
+            if (p1 && p2 && p1.visibility > 0.5 && p2.visibility > 0.5) {
+                ctx.beginPath();
+                ctx.moveTo(p1.x * canvasElement.width, p1.y * canvasElement.height);
+                ctx.lineTo(p2.x * canvasElement.width, p2.y * canvasElement.height);
+                ctx.stroke();
+            }
+        }
+
+        for (let lm of landmarks) {
+            if (lm && lm.visibility > 0.5) {
+                ctx.beginPath();
+                ctx.arc(lm.x * canvasElement.width, lm.y * canvasElement.height, 5, 0, 2 * Math.PI);
+                ctx.fill();
+            }
+        }
+    }
+</script>
 </body>
 </html>
